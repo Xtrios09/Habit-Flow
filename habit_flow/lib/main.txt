@@ -1,0 +1,374 @@
+import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:just_audio/just_audio.dart'; // For music playing
+import 'package:flutter/scheduler.dart'; // For animation timing
+
+void main() => runApp(FocusApp());
+
+class FocusApp extends StatefulWidget {
+  @override
+  _FocusAppState createState() => _FocusAppState();
+}
+
+class _FocusAppState extends State<FocusApp> {
+  String? _name;
+  bool _isDarkTheme = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadName();
+    _loadThemePreference();
+  }
+
+  // Load the saved theme from SharedPreferences
+  Future<void> _loadThemePreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final isDark = prefs.getBool('isDarkTheme') ?? false;
+    setState(() => _isDarkTheme = isDark);
+  }
+
+  Future<void> _loadName() async {
+    final prefs = await SharedPreferences.getInstance();
+    final storedName = prefs.getString('userName');
+    if (storedName == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _askName());
+    } else {
+      setState(() => _name = storedName);
+    }
+  }
+
+  Future<void> _askName() async {
+    final nameController = TextEditingController();
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("What's your name?"),
+        content: TextField(
+          controller: nameController,
+          decoration: InputDecoration(hintText: "Enter your name"),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              if (name.isNotEmpty) {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setString('userName', name);
+                setState(() => _name = name);
+                Navigator.of(context).pop();
+              }
+            },
+            child: Text("OK"),
+          )
+        ],
+      ),
+    );
+  }
+
+  // Save the theme preference to SharedPreferences
+  Future<void> _toggleTheme(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isDarkTheme', value);
+    setState(() => _isDarkTheme = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_name == null) {
+      return MaterialApp(home: Scaffold());
+    }
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Focus App',
+      theme: _isDarkTheme
+          ? ThemeData.dark().copyWith(
+              primarySwatch: Colors.blue,
+              scaffoldBackgroundColor: Color(0xFF121212),
+            )
+          : ThemeData.light().copyWith(
+              primarySwatch: Colors.blue,
+              scaffoldBackgroundColor: Color(0xFFF4F9FF),
+            ),
+      home: HomeScreen(userName: _name!, toggleTheme: _toggleTheme),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  final String userName;
+  final Function(bool) toggleTheme;
+  HomeScreen({required this.userName, required this.toggleTheme});
+
+  @override
+  _HomeScreenState createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late Timer _timer;
+  int _remainingSeconds = 20 * 60 + 12;
+  bool _isRunning = true;
+  bool _musicOn = true;
+
+  List<Map<String, dynamic>> tasks = [
+    {'title': 'Finish report', 'time': '1h', 'done': false},
+    {'title': 'Call with client', 'stepHint': 'Add step', 'done': false},
+    {'title': 'Brainstorm ideas', 'hasIcon': true, 'done': false},
+  ];
+
+  TextEditingController taskController = TextEditingController();
+
+  late AudioPlayer _audioPlayer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+    _audioPlayer = AudioPlayer();
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (_remainingSeconds > 0 && _isRunning) {
+        setState(() => _remainingSeconds--);
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _toggleTimer() {
+    setState(() => _isRunning = !_isRunning);
+  }
+
+  void _toggleMusic() {
+    setState(() {
+      _musicOn = !_musicOn;
+      if (_musicOn) {
+        _audioPlayer.setUrl('https://www.youtube.com/watch?v=1UpnXGQ7hWI'); // Rain Sound Example
+        _audioPlayer.play();
+      } else {
+        _audioPlayer.stop();
+      }
+    });
+  }
+
+  String _formatTime(int seconds) {
+    final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
+    final secs = (seconds % 60).toString().padLeft(2, '0');
+    return "$minutes:$secs";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    double progress = (_remainingSeconds / (20 * 60 + 12));
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Focus Dashboard'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.settings),
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                builder: (_) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SwitchListTile(
+                      value: _musicOn,
+                      onChanged: (_) => _toggleMusic(),
+                      title: Text("Background Music"),
+                    ),
+                    SwitchListTile(
+                      value: _isDarkTheme,
+                      onChanged: widget.toggleTheme,
+                      title: Text("Dark Theme"),
+                    ),
+                    ListTile(
+                      title: Text("Set Timer Duration"),
+                      onTap: () {
+                        // Timer duration settings
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+      body: Center(
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Hey ${widget.userName},\nready to crush it?',
+                  style: Theme.of(context).textTheme.headline4),
+              SizedBox(height: 30),
+              Text('Focus', style: TextStyle(fontWeight: FontWeight.bold)),
+              SizedBox(height: 8),
+              Text('Write project proposal', style: TextStyle(fontSize: 18)),
+              SizedBox(height: 20),
+              Center(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      height: 150,
+                      width: 150,
+                      child: CircularProgressIndicator(
+                        value: 1 - progress,
+                        strokeWidth: 10,
+                        backgroundColor: Colors.grey.shade200,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                      ),
+                    ),
+                    Column(
+                      children: [
+                        Text(_formatTime(_remainingSeconds),
+                            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                        SizedBox(height: 10),
+                        IconButton(
+                          icon: Icon(_isRunning ? Icons.pause : Icons.play_arrow),
+                          iconSize: 32,
+                          onPressed: _toggleTimer,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 30),
+              Text('Tasks', style: Theme.of(context).textTheme.headline5),
+              TextField(
+                controller: taskController,
+                decoration: InputDecoration(
+                  hintText: 'Add a new task',
+                  suffixIcon: IconButton(
+                    icon: Icon(Icons.add),
+                    onPressed: _addTask,
+                  ),
+                ),
+              ),
+              SizedBox(height: 10),
+              Column(
+                children: tasks
+                    .asMap()
+                    .entries
+                    .where((e) => !e.value['done'])
+                    .map((entry) => GestureDetector(
+                          onTap: () => _selectTask(entry.key),
+                          child: TaskTile(
+                            title: entry.value['title'],
+                            time: entry.value['time'],
+                            stepHint: entry.value['stepHint'],
+                            hasIcon: entry.value['hasIcon'] ?? false,
+                            isDone: entry.value['done'],
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _selectTask(int index) {
+    // Code to work on the specific task. Can navigate to a new screen or display a detailed dialog.
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tasks[index]['title']),
+        content: Text("Details and timer for this task."),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: Text("Start Focus"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _addTask() {
+    if (taskController.text.trim().isNotEmpty) {
+      setState(() {
+        tasks.insert(0, {'title': taskController.text.trim(), 'done': false});
+        taskController.clear();
+      });
+    }
+  }
+}
+
+class TaskTile extends StatelessWidget {
+  final String title;
+  final String? time;
+  final String? stepHint;
+  final bool hasIcon;
+  final bool isDone;
+
+  const TaskTile({
+    required this.title,
+    this.time,
+    this.stepHint,
+    this.hasIcon = false,
+    this.isDone = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade200,
+            blurRadius: 6,
+            offset: Offset(0, 4),
+          )
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(children: [
+            Icon(
+              isDone ? Icons.check_box : Icons.check_box_outline_blank,
+              color: isDone ? Colors.green : Colors.grey,
+            ),
+            SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(fontSize: 16)),
+                if (stepHint != null)
+                  Text(stepHint!, style: TextStyle(color: Colors.blue, fontSize: 13))
+              ],
+            ),
+          ]),
+
+          if (time != null) Text(time!),
+          if (hasIcon) Icon(Icons.bubble_chart_rounded, color: Colors.indigoAccent)
+        ],
+      ),
+    );
+  }
+}
